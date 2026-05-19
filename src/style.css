@@ -44,3 +44,26 @@ html, body {
 #github-link svg {
   flex-shrink: 0;
 }
+
+#sound-toggle {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  width: 44px;
+  height: 44px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.15);
+  color: white;
+  font-size: 20px;
+  cursor: pointer;
+  z-index: 100;
+  transition: background 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#sound-toggle:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
