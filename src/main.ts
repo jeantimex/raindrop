@@ -44,7 +44,7 @@ class App {
     wiperFadeSpeed: 0.15,
     soundEnabled: false,
     rainVolume: 0.5,
-    thunderVolume: 1.0,
+    thunderVolume: 0.5,
   }
 
   private backgrounds: Record<string, string | null> = {
