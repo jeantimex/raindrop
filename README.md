@@ -4,6 +4,8 @@ A WebGPU implementation of realistic raindrops on glass, based on the beautiful 
 
 **Original Shadertoy:** https://www.shadertoy.com/view/ltffzl
 
+https://github.com/user-attachments/assets/4f17c0d3-d9c0-487d-9e4d-5e38d7a34ea6
+
 ## How It Works
 
 The effect simulates raindrops clinging to and sliding down a glass window. Unlike simple particle systems, this approach captures the unique behavior of water on glass: drops that stick, accumulate, then suddenly slide down due to gravity overcoming surface tension.
