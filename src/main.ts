@@ -19,7 +19,7 @@ class App {
     dropSize: 1.0,
     minBlur: 2.0,
     maxBlur: 6.0,
-    refractionStrength: 1.0,
+    refractionStrength: 0.3,
     rimLightIntensity: 0.08,
     specularIntensity: 0.15,
     specularPower: 20.0,
