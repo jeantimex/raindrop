@@ -29,7 +29,7 @@ class App {
 
   private backgrounds: Record<string, string | null> = {
     'Neon Night': null, // procedural
-    'Diagon Alley': '/backgrounds/diagon_alley.jpg',
+    'Diagon Alley': `${import.meta.env.BASE_URL}backgrounds/diagon_alley.jpg`,
   }
 
   async init() {
