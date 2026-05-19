@@ -697,9 +697,26 @@ fn ProceduralBackground(uv: vec2<f32>, blur: f32) -> vec3<f32> {
 }
 
 // Texture background: samples an image with mipmap-based blur
-// Higher mip levels = smaller resolution = blurrier image
+// Uses "cover" scaling - fills screen while maintaining aspect ratio
 fn TextureBackground(uv: vec2<f32>, blur: f32) -> vec3<f32> {
-  let texUV = vec2<f32>(uv.x, 1.0 - uv.y);
+  // Get texture and screen dimensions
+  let texSize = vec2<f32>(textureDimensions(bgTexture, 0));
+  let screenAspect = uniforms.width / uniforms.height;
+  let texAspect = texSize.x / texSize.y;
+
+  // Calculate UV scaling for "cover" behavior
+  var coverUV = uv;
+  if (screenAspect > texAspect) {
+    // Screen is wider than texture - scale to match width, crop top/bottom
+    let scale = screenAspect / texAspect;
+    coverUV.y = (uv.y - 0.5) / scale + 0.5;
+  } else {
+    // Screen is taller than texture - scale to match height, crop left/right
+    let scale = texAspect / screenAspect;
+    coverUV.x = (uv.x - 0.5) / scale + 0.5;
+  }
+
+  let texUV = vec2<f32>(coverUV.x, 1.0 - coverUV.y);
   let mipLevel = blur * 1.2;
   let color = textureSampleLevel(bgTexture, bgSampler, texUV, mipLevel).rgb;
   return color;
