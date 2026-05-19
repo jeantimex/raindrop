@@ -32,11 +32,13 @@ struct Uniforms {
   lightningIntensity: f32,
   useTextureBackground: f32,
   randomSeed: f32,
+  wiperEnabled: f32,
 }
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 @group(0) @binding(1) var bgSampler: sampler;
 @group(0) @binding(2) var bgTexture: texture_2d<f32>;
+@group(0) @binding(3) var wipeMask: texture_2d<f32>;
 
 struct VertexOutput {
   @builtin(position) position: vec4<f32>,
@@ -311,25 +313,37 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
   let layer1 = S(0.25, 0.75, rainAmount);
   let layer2 = S(0.0, 0.5, rainAmount);
 
-  // Get drop mask and trail mask
+  // Sample wipe mask to determine clean areas
+  var wipeFactor = 0.0;
+  if (uniforms.wiperEnabled > 0.5) {
+    let wipeUV = vec2<f32>(uv.x, 1.0 - uv.y);
+    let wipeSize = vec2<u32>(textureDimensions(wipeMask));
+    let wipeCoord = vec2<i32>(i32(wipeUV.x * f32(wipeSize.x)), i32(wipeUV.y * f32(wipeSize.y)));
+    wipeFactor = textureLoad(wipeMask, wipeCoord, 0).r;
+  }
+
+  // Get drop mask and trail mask, reduced by wipe factor
   let c = Drops(centeredUV, dropT, staticDrops, layer1, layer2);
-  let dropMask = c.x;
+  let dropMask = c.x * (1.0 - wipeFactor);
 
   // NORMAL CALCULATION via finite differences
   // Sample drops at slightly offset positions to estimate surface slope
   // This gives us the direction light would refract through the drop
   let e = vec2<f32>(0.002, 0.0);
-  let cx = Drops(centeredUV + e, dropT, staticDrops, layer1, layer2).x;
-  let cy = Drops(centeredUV + e.yx, dropT, staticDrops, layer1, layer2).x;
-  let n = vec2<f32>(cx - c.x, cy - c.x);  // Surface normal (2D gradient)
+  let cx = Drops(centeredUV + e, dropT, staticDrops, layer1, layer2).x * (1.0 - wipeFactor);
+  let cy = Drops(centeredUV + e.yx, dropT, staticDrops, layer1, layer2).x * (1.0 - wipeFactor);
+  let n = vec2<f32>(cx - c.x * (1.0 - wipeFactor), cy - c.x * (1.0 - wipeFactor));  // Surface normal (2D gradient)
 
   // Focus/blur: drops are sharp, background through trail is blurry
-  let focus = mix(maxBlur - c.y, minBlur, S(0.1, 0.2, dropMask));
+  // Wiped areas have sharper focus (less blur)
+  let trailBlur = c.y * (1.0 - wipeFactor);
+  let focus = mix(maxBlur - trailBlur, minBlur, S(0.1, 0.2, dropMask));
+  let wipedFocus = mix(focus, minBlur * 0.5, wipeFactor);
 
   // REFRACTION: offset UV by normal to simulate light bending through water
   // This is what makes the background appear distorted through each drop
   let refractedUV = uv + n * uniforms.refractionStrength;
-  var col = Background(refractedUV, focus);
+  var col = Background(refractedUV, wipedFocus);
 
   // RIM LIGHTING: bright edge where drop surface curves away from viewer
   // Creates the 3D "dome" appearance of water drops

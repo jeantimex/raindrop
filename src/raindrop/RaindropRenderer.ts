@@ -38,6 +38,9 @@ export interface RaindropParams {
   specularPower: number
   lightningEnabled: boolean
   lightningIntensity: number
+  wiperEnabled: boolean
+  wiperBrushSize: number
+  wiperFadeSpeed: number
 }
 
 export class RaindropRenderer {
@@ -55,6 +58,23 @@ export class RaindropRenderer {
   private sampler!: GPUSampler
   private backgroundTexture: GPUTexture | null = null
   private useTextureBackground: boolean = false
+
+  // Wipe mask for glass cleaning effect
+  private wipeMaskTexture!: GPUTexture
+  private wipeMaskSize = 512
+  private wipeComputePipeline!: GPUComputePipeline
+  private wipeFadeComputePipeline!: GPUComputePipeline
+  private wipeBindGroupLayout!: GPUBindGroupLayout
+  private wipeFadeBindGroupLayout!: GPUBindGroupLayout
+  private wipeParamsBuffer!: GPUBuffer
+  private fadeParamsBuffer!: GPUBuffer
+
+  // Mouse state for wiping
+  private mouseX: number = 0
+  private mouseY: number = 0
+  private mousePressed: boolean = false
+  private lastMouseX: number = 0
+  private lastMouseY: number = 0
 
   private width: number = 0
   private height: number = 0
@@ -91,7 +111,10 @@ export class RaindropRenderer {
     this.createBuffers()
     this.createSampler()
     this.createPlaceholderTexture()
+    this.createWipeMask()
+    this.createWipeComputePipeline()
     this.createPipeline()
+    this.setupMouseHandlers()
   }
 
   /**
@@ -155,6 +178,170 @@ export class RaindropRenderer {
   }
 
   /**
+   * Creates the wipe mask texture for tracking cleaned areas.
+   * 0 = dirty/rainy, 1 = clean/wiped
+   */
+  private createWipeMask() {
+    this.wipeMaskTexture = this.device.createTexture({
+      size: [this.wipeMaskSize, this.wipeMaskSize],
+      format: 'r32float',
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING,
+    })
+  }
+
+  /**
+   * Creates compute pipelines for painting and fading the wipe mask.
+   */
+  private createWipeComputePipeline() {
+    // Compute shader to paint circles on the wipe mask
+    const wipeShaderCode = `
+      struct WipeParams {
+        posX: f32,
+        posY: f32,
+        lastPosX: f32,
+        lastPosY: f32,
+        brushSize: f32,
+        painting: f32,
+      }
+      @group(0) @binding(0) var wipeMask: texture_storage_2d<r32float, read_write>;
+      @group(0) @binding(1) var<uniform> params: WipeParams;
+
+      @compute @workgroup_size(8, 8)
+      fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+        let size = textureDimensions(wipeMask);
+        if (id.x >= size.x || id.y >= size.y) {
+          return;
+        }
+        if (params.painting < 0.5) {
+          return;
+        }
+
+        let uv = vec2<f32>(f32(id.x) / f32(size.x), f32(id.y) / f32(size.y));
+        let pos = vec2<f32>(params.posX, params.posY);
+        let lastPos = vec2<f32>(params.lastPosX, params.lastPosY);
+
+        // Paint along the line from lastPos to pos for smooth strokes
+        let lineDir = pos - lastPos;
+        let lineLen = length(lineDir);
+        let steps = max(1.0, lineLen * 50.0);
+
+        var minDist = 1000.0;
+        for (var i = 0.0; i < steps; i = i + 1.0) {
+          let t = i / steps;
+          let samplePos = mix(lastPos, pos, t);
+          let d = length(uv - samplePos);
+          minDist = min(minDist, d);
+        }
+
+        let brushRadius = params.brushSize;
+        let current = textureLoad(wipeMask, id.xy).r;
+        let paint = smoothstep(brushRadius, brushRadius * 0.5, minDist);
+        let newVal = max(current, paint);
+        textureStore(wipeMask, id.xy, vec4<f32>(newVal, 0.0, 0.0, 1.0));
+      }
+    `
+
+    // Compute shader to fade the wipe mask over time
+    const fadeShaderCode = `
+      struct FadeParams {
+        fadeAmount: f32,
+      }
+      @group(0) @binding(0) var wipeMask: texture_storage_2d<r32float, read_write>;
+      @group(0) @binding(1) var<uniform> params: FadeParams;
+
+      @compute @workgroup_size(8, 8)
+      fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+        let size = textureDimensions(wipeMask);
+        if (id.x >= size.x || id.y >= size.y) {
+          return;
+        }
+
+        let current = textureLoad(wipeMask, id.xy).r;
+        let newVal = max(0.0, current - params.fadeAmount);
+        textureStore(wipeMask, id.xy, vec4<f32>(newVal, 0.0, 0.0, 1.0));
+      }
+    `
+
+    const wipeShader = this.device.createShaderModule({ code: wipeShaderCode })
+    const fadeShader = this.device.createShaderModule({ code: fadeShaderCode })
+
+    this.wipeBindGroupLayout = this.device.createBindGroupLayout({
+      entries: [
+        { binding: 0, visibility: GPUShaderStage.COMPUTE, storageTexture: { access: 'read-write', format: 'r32float' } },
+        { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
+      ],
+    })
+
+    this.wipeFadeBindGroupLayout = this.device.createBindGroupLayout({
+      entries: [
+        { binding: 0, visibility: GPUShaderStage.COMPUTE, storageTexture: { access: 'read-write', format: 'r32float' } },
+        { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
+      ],
+    })
+
+    this.wipeComputePipeline = this.device.createComputePipeline({
+      layout: this.device.createPipelineLayout({ bindGroupLayouts: [this.wipeBindGroupLayout] }),
+      compute: { module: wipeShader, entryPoint: 'main' },
+    })
+
+    this.wipeFadeComputePipeline = this.device.createComputePipeline({
+      layout: this.device.createPipelineLayout({ bindGroupLayouts: [this.wipeFadeBindGroupLayout] }),
+      compute: { module: fadeShader, entryPoint: 'main' },
+    })
+
+    // Pre-create buffers for wipe parameters (reused each frame)
+    this.wipeParamsBuffer = this.device.createBuffer({
+      size: 32,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    })
+    this.fadeParamsBuffer = this.device.createBuffer({
+      size: 16,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    })
+  }
+
+  /**
+   * Sets up mouse/pointer event handlers for the wiper feature.
+   */
+  private setupMouseHandlers() {
+    const getPos = (e: PointerEvent) => {
+      const rect = this.canvas.getBoundingClientRect()
+      return {
+        x: (e.clientX - rect.left) / rect.width,
+        y: (e.clientY - rect.top) / rect.height,
+      }
+    }
+
+    this.canvas.addEventListener('pointerdown', (e) => {
+      const pos = getPos(e)
+      this.mouseX = pos.x
+      this.mouseY = pos.y
+      this.lastMouseX = pos.x
+      this.lastMouseY = pos.y
+      this.mousePressed = true
+      this.canvas.setPointerCapture(e.pointerId)
+    })
+
+    this.canvas.addEventListener('pointermove', (e) => {
+      if (this.mousePressed) {
+        this.lastMouseX = this.mouseX
+        this.lastMouseY = this.mouseY
+        const pos = getPos(e)
+        this.mouseX = pos.x
+        this.mouseY = pos.y
+      }
+    })
+
+    this.canvas.addEventListener('pointerup', () => {
+      this.mousePressed = false
+    })
+
+    this.canvas.addEventListener('pointerleave', () => {
+      this.mousePressed = false
+    })
+  }
+
+  /**
    * Creates the render pipeline with vertex and fragment shaders.
    * The pipeline uses a simple fullscreen quad approach - all the
    * interesting work happens in the fragment shader.
@@ -167,6 +354,7 @@ export class RaindropRenderer {
         { binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
         { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
         { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+        { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'unfilterable-float' } },
       ],
     })
 
@@ -201,6 +389,7 @@ export class RaindropRenderer {
         { binding: 0, resource: { buffer: this.uniformBuffer } },
         { binding: 1, resource: this.sampler },
         { binding: 2, resource: this.backgroundTexture!.createView() },
+        { binding: 3, resource: this.wipeMaskTexture.createView() },
       ],
     })
   }
@@ -343,6 +532,11 @@ export class RaindropRenderer {
     // Accumulate drop time based on current speed - prevents jumps when speed changes
     this.dropTime += deltaTime * params.dropSpeed
 
+    // Update wipe mask (paint and fade)
+    if (params.wiperEnabled) {
+      this.updateWipeMask(deltaTime, params)
+    }
+
     const uniforms = new Float32Array([
       this.time,                              // 0: animation time
       this.width,                             // 1: canvas width in pixels
@@ -361,9 +555,75 @@ export class RaindropRenderer {
       params.lightningIntensity,              // 14: lightning brightness
       this.useTextureBackground ? 1.0 : 0.0,  // 15: texture vs procedural background
       this.randomSeed,                        // 16: seed for procedural bokeh
-      0, 0, 0                                 // 17-19: padding to 80 bytes
+      params.wiperEnabled ? 1.0 : 0.0,        // 17: wiper enabled flag
+      0, 0                                    // 18-19: padding to 80 bytes
     ])
     this.device.queue.writeBuffer(this.uniformBuffer, 0, uniforms)
+  }
+
+  /**
+   * Updates the wipe mask texture - paints where mouse drags and fades over time.
+   */
+  private updateWipeMask(deltaTime: number, params: RaindropParams) {
+    const commandEncoder = this.device.createCommandEncoder()
+
+    // Paint circles where mouse is dragged
+    const wipeParams = new Float32Array([
+      this.mouseX,
+      this.mouseY,
+      this.lastMouseX,
+      this.lastMouseY,
+      params.wiperBrushSize,
+      this.mousePressed ? 1.0 : 0.0,
+      0, 0,
+    ])
+    this.device.queue.writeBuffer(this.wipeParamsBuffer, 0, wipeParams)
+
+    const wipeBindGroup = this.device.createBindGroup({
+      layout: this.wipeBindGroupLayout,
+      entries: [
+        { binding: 0, resource: this.wipeMaskTexture.createView() },
+        { binding: 1, resource: { buffer: this.wipeParamsBuffer } },
+      ],
+    })
+
+    const wipePass = commandEncoder.beginComputePass()
+    wipePass.setPipeline(this.wipeComputePipeline)
+    wipePass.setBindGroup(0, wipeBindGroup)
+    wipePass.dispatchWorkgroups(
+      Math.ceil(this.wipeMaskSize / 8),
+      Math.ceil(this.wipeMaskSize / 8)
+    )
+    wipePass.end()
+
+    // Fade the mask over time
+    const fadeAmount = deltaTime * params.wiperFadeSpeed
+    this.device.queue.writeBuffer(this.fadeParamsBuffer, 0, new Float32Array([fadeAmount, 0, 0, 0]))
+
+    const fadeBindGroup = this.device.createBindGroup({
+      layout: this.wipeFadeBindGroupLayout,
+      entries: [
+        { binding: 0, resource: this.wipeMaskTexture.createView() },
+        { binding: 1, resource: { buffer: this.fadeParamsBuffer } },
+      ],
+    })
+
+    const fadePass = commandEncoder.beginComputePass()
+    fadePass.setPipeline(this.wipeFadeComputePipeline)
+    fadePass.setBindGroup(0, fadeBindGroup)
+    fadePass.dispatchWorkgroups(
+      Math.ceil(this.wipeMaskSize / 8),
+      Math.ceil(this.wipeMaskSize / 8)
+    )
+    fadePass.end()
+
+    this.device.queue.submit([commandEncoder.finish()])
+
+    // Reset last position to current after painting
+    if (this.mousePressed) {
+      this.lastMouseX = this.mouseX
+      this.lastMouseY = this.mouseY
+    }
   }
 
   /**

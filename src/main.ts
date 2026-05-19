@@ -25,6 +25,9 @@ class App {
     specularPower: 20.0,
     lightningEnabled: true,
     lightningIntensity: 0.3,
+    wiperEnabled: true,
+    wiperBrushSize: 0.08,
+    wiperFadeSpeed: 0.15,
   }
 
   private backgrounds: Record<string, string | null> = {
@@ -77,6 +80,11 @@ class App {
     const effectsFolder = this.gui.addFolder('Effects')
     effectsFolder.add(this.params, 'lightningEnabled').name('Lightning')
     effectsFolder.add(this.params, 'lightningIntensity', 0, 1, 0.05).name('Lightning Intensity')
+
+    const wiperFolder = this.gui.addFolder('Wiper')
+    wiperFolder.add(this.params, 'wiperEnabled').name('Enabled')
+    wiperFolder.add(this.params, 'wiperBrushSize', 0.02, 0.2, 0.01).name('Brush Size')
+    wiperFolder.add(this.params, 'wiperFadeSpeed', 0.05, 0.5, 0.01).name('Fade Speed')
 
     this.gui.close()
   }
