@@ -1,3 +1,27 @@
+/**
+ * RaindropRenderer - WebGPU-based raindrop on glass effect
+ *
+ * This renderer creates a realistic simulation of raindrops on a window.
+ * The effect is entirely GPU-based using a single fragment shader that:
+ *
+ * 1. GRID-BASED DROPS: Divides the screen into cells, each containing one drop.
+ *    Random offsets prevent visible grid patterns.
+ *
+ * 2. MULTI-LAYER DEPTH: Two falling drop layers at different scales create
+ *    the illusion of drops at varying distances from the glass.
+ *
+ * 3. REFRACTION: Each drop acts as a lens, bending light to distort the
+ *    background image. This is computed by sampling the drop field at
+ *    offset positions to estimate surface normals.
+ *
+ * 4. MIPMAP BLUR: Background blur uses GPU mipmaps - lower resolution mip
+ *    levels naturally produce a blurred result, much faster than multi-tap
+ *    blur filters.
+ *
+ * 5. LIGHTING: Rim lights on drop edges and specular highlights create
+ *    the 3D dome appearance of water drops.
+ */
+
 import raindropShader from '../shaders/raindrop.wgsl?raw'
 
 export interface RaindropParams {
@@ -35,6 +59,7 @@ export class RaindropRenderer {
   private width: number = 0
   private height: number = 0
   private time: number = 0
+  // Random seed ensures bokeh lights vary between page loads
   private randomSeed: number = Math.random() * 1000
 
   constructor(canvas: HTMLCanvasElement) {
@@ -67,12 +92,18 @@ export class RaindropRenderer {
     this.createPipeline()
   }
 
+  /**
+   * Creates GPU buffers for the fullscreen quad and uniform data.
+   * The quad covers the entire screen (-1 to 1 in clip space).
+   */
   private createBuffers() {
+    // Fullscreen quad: 4 vertices for triangle strip
+    // Each vertex: position (x,y) + texcoord (u,v)
     const quadVertices = new Float32Array([
-      -1, -1, 0, 1,
-       1, -1, 1, 1,
-      -1,  1, 0, 0,
-       1,  1, 1, 0,
+      -1, -1, 0, 1,  // bottom-left
+       1, -1, 1, 1,  // bottom-right
+      -1,  1, 0, 0,  // top-left
+       1,  1, 1, 0,  // top-right
     ])
 
     this.quadVertexBuffer = this.device.createBuffer({
@@ -81,13 +112,18 @@ export class RaindropRenderer {
     })
     this.device.queue.writeBuffer(this.quadVertexBuffer, 0, quadVertices)
 
-    // 20 floats needed, round up to 80 bytes (multiple of 16)
+    // Uniform buffer for all shader parameters
+    // 20 floats needed, rounded to 80 bytes (must be multiple of 16)
     this.uniformBuffer = this.device.createBuffer({
       size: 80,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     })
   }
 
+  /**
+   * Creates a linear sampler for smooth texture filtering.
+   * Mipmaps are enabled for the blur effect.
+   */
   private createSampler() {
     this.sampler = this.device.createSampler({
       magFilter: 'linear',
@@ -98,8 +134,11 @@ export class RaindropRenderer {
     })
   }
 
+  /**
+   * Creates a 1x1 black texture as placeholder until a real background loads.
+   * This prevents shader errors from null texture bindings.
+   */
   private createPlaceholderTexture() {
-    // 1x1 placeholder texture
     this.backgroundTexture = this.device.createTexture({
       size: [1, 1],
       format: 'rgba8unorm',
@@ -113,6 +152,11 @@ export class RaindropRenderer {
     )
   }
 
+  /**
+   * Creates the render pipeline with vertex and fragment shaders.
+   * The pipeline uses a simple fullscreen quad approach - all the
+   * interesting work happens in the fragment shader.
+   */
   private createPipeline() {
     const shaderModule = this.device.createShaderModule({ code: raindropShader })
 
@@ -132,10 +176,10 @@ export class RaindropRenderer {
         module: shaderModule,
         entryPoint: 'vertexMain',
         buffers: [{
-          arrayStride: 16,
+          arrayStride: 16,  // 4 floats * 4 bytes
           attributes: [
-            { shaderLocation: 0, offset: 0, format: 'float32x2' },
-            { shaderLocation: 1, offset: 8, format: 'float32x2' },
+            { shaderLocation: 0, offset: 0, format: 'float32x2' },  // position
+            { shaderLocation: 1, offset: 8, format: 'float32x2' },  // texcoord
           ],
         }],
       },
@@ -159,9 +203,12 @@ export class RaindropRenderer {
     })
   }
 
+  /**
+   * Loads a background image and generates mipmaps for blur effect.
+   * Pass null to use the procedural bokeh background instead.
+   */
   async setBackground(imagePath: string | null) {
     if (imagePath === null) {
-      // Use procedural background
       this.useTextureBackground = false
       return
     }
@@ -171,12 +218,11 @@ export class RaindropRenderer {
       const blob = await response.blob()
       const imageBitmap = await createImageBitmap(blob)
 
-      // Destroy old texture if it exists and is not the placeholder
       if (this.backgroundTexture && this.backgroundTexture.width > 1) {
         this.backgroundTexture.destroy()
       }
 
-      // Calculate mip levels
+      // Calculate mip levels: log2 of largest dimension
       const mipLevelCount = Math.floor(Math.log2(Math.max(imageBitmap.width, imageBitmap.height))) + 1
 
       this.backgroundTexture = this.device.createTexture({
@@ -192,7 +238,7 @@ export class RaindropRenderer {
         [imageBitmap.width, imageBitmap.height]
       )
 
-      // Generate mipmaps
+      // Generate mipmaps for blur effect
       await this.generateMipmaps(this.backgroundTexture, imageBitmap.width, imageBitmap.height)
 
       this.useTextureBackground = true
@@ -202,6 +248,12 @@ export class RaindropRenderer {
     }
   }
 
+  /**
+   * Generates mipmaps using a compute shader.
+   * Each mip level is half the resolution of the previous, creating
+   * progressively blurrier versions of the image. The fragment shader
+   * samples different mip levels based on desired blur amount.
+   */
   private async generateMipmaps(texture: GPUTexture, width: number, height: number) {
     const mipmapShaderCode = `
       @group(0) @binding(0) var inputTex: texture_2d<f32>;
@@ -239,6 +291,7 @@ export class RaindropRenderer {
     let mipHeight = height
     let mipLevel = 0
 
+    // Generate each mip level by downsampling the previous level
     while (mipWidth > 1 || mipHeight > 1) {
       const nextWidth = Math.max(1, Math.floor(mipWidth / 2))
       const nextHeight = Math.max(1, Math.floor(mipHeight / 2))
@@ -266,6 +319,9 @@ export class RaindropRenderer {
     }
   }
 
+  /**
+   * Handles canvas resize with device pixel ratio support for sharp rendering.
+   */
   resize(width: number, height: number) {
     const dpr = window.devicePixelRatio || 1
     this.width = Math.floor(width * dpr)
@@ -276,32 +332,40 @@ export class RaindropRenderer {
     this.canvas.style.height = `${height}px`
   }
 
+  /**
+   * Updates uniform buffer with current time and all effect parameters.
+   * Called every frame before render().
+   */
   update(_deltaTime: number, time: number, params: RaindropParams) {
     this.time = time
 
     const uniforms = new Float32Array([
-      this.time,                              // 0
-      this.width,                             // 1
-      this.height,                            // 2
-      params.rainAmount,                      // 3
-      params.dropSpeed,                       // 4
-      params.sawProbability,                  // 5
-      params.dropSize,                        // 6
-      params.minBlur,                         // 7
-      params.maxBlur,                         // 8
-      params.refractionStrength,              // 9
-      params.rimLightIntensity,               // 10
-      params.specularIntensity,               // 11
-      params.specularPower,                   // 12
-      params.lightningEnabled ? 1.0 : 0.0,    // 13
-      params.lightningIntensity,              // 14
-      this.useTextureBackground ? 1.0 : 0.0,  // 15
-      this.randomSeed,                        // 16
-      0, 0, 0                                 // padding to 20 floats
+      this.time,                              // 0: animation time
+      this.width,                             // 1: canvas width in pixels
+      this.height,                            // 2: canvas height in pixels
+      params.rainAmount,                      // 3: overall rain intensity
+      params.dropSpeed,                       // 4: how fast drops fall
+      params.sawProbability,                  // 5: chance of stick-slide vs linear motion
+      params.dropSize,                        // 6: (unused currently)
+      params.minBlur,                         // 7: blur amount on drops
+      params.maxBlur,                         // 8: blur amount on background
+      params.refractionStrength,              // 9: how much drops distort background
+      params.rimLightIntensity,               // 10: edge highlight brightness
+      params.specularIntensity,               // 11: specular highlight brightness
+      params.specularPower,                   // 12: specular highlight sharpness
+      params.lightningEnabled ? 1.0 : 0.0,    // 13: lightning flashes toggle
+      params.lightningIntensity,              // 14: lightning brightness
+      this.useTextureBackground ? 1.0 : 0.0,  // 15: texture vs procedural background
+      this.randomSeed,                        // 16: seed for procedural bokeh
+      0, 0, 0                                 // 17-19: padding to 80 bytes
     ])
     this.device.queue.writeBuffer(this.uniformBuffer, 0, uniforms)
   }
 
+  /**
+   * Renders a single frame by drawing the fullscreen quad.
+   * The fragment shader does all the raindrop computation per-pixel.
+   */
   render() {
     const commandEncoder = this.device.createCommandEncoder()
 
@@ -317,7 +381,7 @@ export class RaindropRenderer {
     pass.setPipeline(this.pipeline)
     pass.setBindGroup(0, this.bindGroup)
     pass.setVertexBuffer(0, this.quadVertexBuffer)
-    pass.draw(4)
+    pass.draw(4)  // 4 vertices for triangle strip
     pass.end()
 
     this.device.queue.submit([commandEncoder.finish()])
