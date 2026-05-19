@@ -139,7 +139,3 @@ src/
 ```
 
 The entire effect runs in a single fragment shader on a fullscreen quad. No geometry, no particles - just math.
-
-## License
-
-MIT
