@@ -5,7 +5,11 @@ import { RaindropRenderer, RaindropParams } from './raindrop/RaindropRenderer'
 class App {
   private renderer!: RaindropRenderer
   private lastTime = 0
+  private accumulatedTime = 0
   private gui!: GUI
+  private controls = {
+    paused: false
+  }
 
   private params: RaindropParams = {
     background: 'Neon Night',
@@ -43,6 +47,8 @@ class App {
 
   private setupGUI() {
     this.gui = new GUI()
+
+    this.gui.add(this.controls, 'paused').name('Paused')
 
     const sceneFolder = this.gui.addFolder('Scene')
     sceneFolder.add(this.params, 'background', Object.keys(this.backgrounds))
@@ -90,7 +96,14 @@ class App {
     const deltaTime = Math.min((time - this.lastTime) / 1000, 0.1)
     this.lastTime = time
 
-    this.renderer.update(deltaTime, time / 1000, this.params)
+    if (this.controls.paused) {
+      requestAnimationFrame(this.loop.bind(this))
+      return
+    }
+
+    this.accumulatedTime += deltaTime
+
+    this.renderer.update(deltaTime, this.accumulatedTime, this.params)
     this.renderer.render()
 
     requestAnimationFrame(this.loop.bind(this))
