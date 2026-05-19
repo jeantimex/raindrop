@@ -12,7 +12,7 @@ class App {
   }
 
   private params: RaindropParams = {
-    background: 'Neon Night',
+    background: 'Diagon Alley',
     rainAmount: 0.8,
     dropSpeed: 0.75,
     sawProbability: 0.4,
@@ -39,6 +39,7 @@ class App {
 
     this.renderer = new RaindropRenderer(canvas)
     await this.renderer.init()
+    await this.renderer.setBackground(this.backgrounds[this.params.background])
 
     this.setupGUI()
     this.setupResizeHandler()
