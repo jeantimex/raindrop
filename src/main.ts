@@ -21,6 +21,7 @@ class App {
   private audioContext: AudioContext | null = null
   private rainAudio: HTMLAudioElement | null = null
   private thunderBuffer: AudioBuffer | null = null
+  private masterGain: GainNode | null = null
   private lastLightningValue = 0
   private lightningThreshold = 0.3
   private soundButton: HTMLButtonElement | null = null
@@ -75,6 +76,9 @@ class App {
     this.rainAudio.volume = this.params.rainVolume
 
     this.audioContext = new AudioContext()
+    this.masterGain = this.audioContext.createGain()
+    this.masterGain.connect(this.audioContext.destination)
+
     try {
       const response = await fetch(`${import.meta.env.BASE_URL}sound/thunder.mp3`)
       const arrayBuffer = await response.arrayBuffer()
@@ -111,13 +115,20 @@ class App {
     }
     if (this.params.soundEnabled) {
       this.rainAudio?.play().catch(() => {})
+      if (this.masterGain) {
+        this.masterGain.gain.value = 1.0
+      }
     } else {
       this.rainAudio?.pause()
+      // Immediately silence all thunder sounds
+      if (this.masterGain) {
+        this.masterGain.gain.value = 0
+      }
     }
   }
 
   private playThunder() {
-    if (!this.audioContext || !this.thunderBuffer || !this.params.soundEnabled) return
+    if (!this.audioContext || !this.thunderBuffer || !this.masterGain || !this.params.soundEnabled) return
 
     const source = this.audioContext.createBufferSource()
     const gainNode = this.audioContext.createGain()
@@ -126,7 +137,7 @@ class App {
     gainNode.gain.value = this.params.thunderVolume
 
     source.connect(gainNode)
-    gainNode.connect(this.audioContext.destination)
+    gainNode.connect(this.masterGain)
     source.start()
   }
 
