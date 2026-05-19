@@ -76,6 +76,8 @@ class App {
     const effectsFolder = this.gui.addFolder('Effects')
     effectsFolder.add(this.params, 'lightningEnabled').name('Lightning')
     effectsFolder.add(this.params, 'lightningIntensity', 0, 1, 0.05).name('Lightning Intensity')
+
+    this.gui.close()
   }
 
   private setupResizeHandler() {
