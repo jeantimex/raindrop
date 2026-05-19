@@ -60,7 +60,7 @@ class App {
       })
 
     const rainFolder = this.gui.addFolder('Rain')
-    rainFolder.add(this.params, 'rainAmount', 0, 1, 0.01).name('Amount')
+    rainFolder.add(this.params, 'rainAmount', 0, 2, 0.01).name('Amount')
     rainFolder.add(this.params, 'dropSpeed', 0.1, 2, 0.05).name('Speed')
     rainFolder.add(this.params, 'sawProbability', 0, 1, 0.05).name('Stop Probability')
 
