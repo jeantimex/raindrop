@@ -314,7 +314,7 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
   // NORMAL CALCULATION via finite differences
   // Sample drops at slightly offset positions to estimate surface slope
   // This gives us the direction light would refract through the drop
-  let e = vec2<f32>(0.002, 0.0);
+  let e = vec2<f32>(0.001, 0.0);
   let cx = Drops(centeredUV + e, t, staticDrops, layer1, layer2).x;
   let cy = Drops(centeredUV + e.yx, t, staticDrops, layer1, layer2).x;
   let n = vec2<f32>(cx - c.x, cy - c.x);  // Surface normal (2D gradient)
