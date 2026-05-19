@@ -625,21 +625,18 @@ fn StaticDrops(uv: vec2<f32>, t: f32) -> f32 {
 // l0: static drops intensity
 // l1: main falling layer intensity
 // l2: secondary falling layer (smaller scale) intensity
-// l3: third layer for heavy rain (activates above rainAmount 1.0)
-fn Drops(uv: vec2<f32>, t: f32, l0: f32, l1: f32, l2: f32, l3: f32) -> vec2<f32> {
+fn Drops(uv: vec2<f32>, t: f32, l0: f32, l1: f32, l2: f32) -> vec2<f32> {
   let s = StaticDrops(uv, t) * l0;
   let m1 = DropLayer2(uv, t) * l1;
   // Second layer at 1.85x scale adds depth - drops appear at different distances
   let m2 = DropLayer2(uv * 1.85, t) * l2;
-  // Third layer at different scale for heavy rain
-  let m3 = DropLayer2(uv * 1.35, t) * l3;
 
   // Combine all drop masks
-  var c = s + m1.x + m2.x + m3.x;
+  var c = s + m1.x + m2.x;
   c = S(0.3, 1.0, c);  // Threshold to sharpen edges
 
   // Return combined mask and max trail intensity
-  return vec2<f32>(c, max(max(m1.y * l0, m2.y * l1), m3.y * l3));
+  return vec2<f32>(c, max(m1.y * l0, m2.y * l1));
 }
 
 // =============================================================================
@@ -740,22 +737,20 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
   // Layer intensities based on rain amount
   // Light rain: mostly static drops
   // Heavy rain: all layers active
-  // rainAmount > 1: extra layer kicks in
   let staticDrops = S(-0.5, 1.0, rainAmount) * 2.0;
   let layer1 = S(0.25, 0.75, rainAmount);
   let layer2 = S(0.0, 0.5, rainAmount);
-  let layer3 = S(1.0, 1.5, rainAmount);  // Activates above rainAmount 1.0
 
   // Get drop mask and trail mask
-  let c = Drops(centeredUV, dropT, staticDrops, layer1, layer2, layer3);
+  let c = Drops(centeredUV, dropT, staticDrops, layer1, layer2);
   let dropMask = c.x;
 
   // NORMAL CALCULATION via finite differences
   // Sample drops at slightly offset positions to estimate surface slope
   // This gives us the direction light would refract through the drop
   let e = vec2<f32>(0.002, 0.0);
-  let cx = Drops(centeredUV + e, dropT, staticDrops, layer1, layer2, layer3).x;
-  let cy = Drops(centeredUV + e.yx, dropT, staticDrops, layer1, layer2, layer3).x;
+  let cx = Drops(centeredUV + e, dropT, staticDrops, layer1, layer2).x;
+  let cy = Drops(centeredUV + e.yx, dropT, staticDrops, layer1, layer2).x;
   let n = vec2<f32>(cx - c.x, cy - c.x);  // Surface normal (2D gradient)
 
   // Focus/blur: drops are sharp, background through trail is blurry
