@@ -116,6 +116,33 @@ Each falling drop consists of:
 
 The trail masks control background blur - areas with trails appear more out-of-focus.
 
+### Interactive Glass Wiping
+
+https://github.com/user-attachments/assets/cc126b69-0fdf-45dd-9216-df59a2a6c020
+
+Click and drag (or touch on mobile) to wipe the glass clean. This simulates clearing raindrops with your finger or a cloth:
+
+```
+Before wiping          After wiping
+┌──────────────┐      ┌──────────────┐
+│ o  o    o  o │      │ o  o    o  o │
+│   o  o    o  │      │   o  ┌────┐  │
+│ o    o  o    │  =>  │ o    │    │  │
+│   o    o   o │      │   o  └────┘o │
+│ o   o    o   │      │ o   o    o   │
+└──────────────┘      └──────────────┘
+                         clean area
+```
+
+**How it works:**
+
+1. A 512x512 **wipe mask texture** tracks which areas have been cleaned (0 = dirty, 1 = clean)
+2. A **compute shader** paints circles along your drag path for smooth brush strokes
+3. The **fragment shader** samples this mask to suppress drops and reduce blur in wiped areas
+4. A **fade compute shader** gradually restores the mask to dirty, so rain accumulates again over time
+
+The wiper uses pointer events, so it works on both desktop (mouse) and mobile (touch).
+
 ## Parameters
 
 | Parameter | Description |
@@ -128,6 +155,9 @@ The trail masks control background blur - areas with trails appear more out-of-f
 | Specular | Bright spot intensity and sharpness |
 | Min/Max Blur | Background blur range |
 | Lightning | Optional flash effect |
+| Wiper Enabled | Toggle interactive glass wiping |
+| Brush Size | Radius of the wiper brush |
+| Fade Speed | How fast wiped areas get rainy again |
 
 ## Architecture
 
