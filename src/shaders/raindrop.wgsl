@@ -1,3 +1,6 @@
+// Based on "Heartfelt" by Martijn Steinrucken aka BigWings
+// https://www.shadertoy.com/view/ltffzl
+
 struct Uniforms {
   time: f32,
   width: f32,
