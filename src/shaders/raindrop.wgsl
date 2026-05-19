@@ -19,7 +19,7 @@ struct Uniforms {
   width: f32,
   height: f32,
   rainAmount: f32,
-  dropSpeed: f32,
+  dropTime: f32,  // pre-accumulated on CPU to prevent jumps when speed changes
   sawProbability: f32,
   dropSize: f32,
   minBlur: f32,
@@ -96,8 +96,9 @@ fn DropLayer2(uv: vec2<f32>, t: f32) -> vec2<f32> {
   let UV = uv;
 
   // Scroll the UV coordinates downward over time to simulate falling rain
+  // t is pre-accumulated dropTime, already includes speed
   var uvMod = uv;
-  uvMod.y = uvMod.y + t * uniforms.dropSpeed;
+  uvMod.y = uvMod.y + t;
 
   // Create a grid of cells - each cell will contain one raindrop
   // The grid is 12x2 (wider than tall) because drops are vertically elongated
@@ -126,7 +127,8 @@ fn DropLayer2(uv: vec2<f32>, t: f32) -> vec2<f32> {
 
   // Vertical animation: some drops use sawtooth (stick-slide motion),
   // others fall more linearly at varying speeds
-  let scaledT = t * uniforms.dropSpeed / 0.75;
+  // Divide by 0.75 to match original animation ratio (internal runs faster than grid scroll)
+  let scaledT = t / 0.75;
   let ti = fract(scaledT + n.z);  // Phase offset per drop
   let useSaw = n.y > uniforms.sawProbability;
   let speed = 0.5 + n.x * 1.0;
@@ -294,6 +296,8 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
   var centeredUV = (fragCoord - 0.5 * resolution) / resolution.y;
 
   let t = uniforms.time * 0.2;
+  // dropT uses pre-accumulated time to prevent jumps when speed changes
+  let dropT = uniforms.dropTime * 0.2;
   let rainAmount = uniforms.rainAmount;
 
   // More rain = more blur (simulates foggy/wet conditions)
@@ -308,15 +312,15 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
   let layer2 = S(0.0, 0.5, rainAmount);
 
   // Get drop mask and trail mask
-  let c = Drops(centeredUV, t, staticDrops, layer1, layer2);
+  let c = Drops(centeredUV, dropT, staticDrops, layer1, layer2);
   let dropMask = c.x;
 
   // NORMAL CALCULATION via finite differences
   // Sample drops at slightly offset positions to estimate surface slope
   // This gives us the direction light would refract through the drop
   let e = vec2<f32>(0.002, 0.0);
-  let cx = Drops(centeredUV + e, t, staticDrops, layer1, layer2).x;
-  let cy = Drops(centeredUV + e.yx, t, staticDrops, layer1, layer2).x;
+  let cx = Drops(centeredUV + e, dropT, staticDrops, layer1, layer2).x;
+  let cy = Drops(centeredUV + e.yx, dropT, staticDrops, layer1, layer2).x;
   let n = vec2<f32>(cx - c.x, cy - c.x);  // Surface normal (2D gradient)
 
   // Focus/blur: drops are sharp, background through trail is blurry

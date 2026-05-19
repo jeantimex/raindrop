@@ -59,6 +59,8 @@ export class RaindropRenderer {
   private width: number = 0
   private height: number = 0
   private time: number = 0
+  // Accumulated drop time - prevents jumps when speed changes
+  private dropTime: number = 0
   // Random seed ensures bokeh lights vary between page loads
   private randomSeed: number = Math.random() * 1000
 
@@ -336,15 +338,17 @@ export class RaindropRenderer {
    * Updates uniform buffer with current time and all effect parameters.
    * Called every frame before render().
    */
-  update(_deltaTime: number, time: number, params: RaindropParams) {
+  update(deltaTime: number, time: number, params: RaindropParams) {
     this.time = time
+    // Accumulate drop time based on current speed - prevents jumps when speed changes
+    this.dropTime += deltaTime * params.dropSpeed
 
     const uniforms = new Float32Array([
       this.time,                              // 0: animation time
       this.width,                             // 1: canvas width in pixels
       this.height,                            // 2: canvas height in pixels
       params.rainAmount,                      // 3: overall rain intensity
-      params.dropSpeed,                       // 4: how fast drops fall
+      this.dropTime,                          // 4: accumulated drop time (was dropSpeed)
       params.sawProbability,                  // 5: chance of stick-slide vs linear motion
       params.dropSize,                        // 6: (unused currently)
       params.minBlur,                         // 7: blur amount on drops
