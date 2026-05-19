@@ -5,12 +5,17 @@ struct Uniforms {
   rainAmount: f32,
   dropSpeed: f32,
   sawProbability: f32,
+  dropSize: f32,
   minBlur: f32,
   maxBlur: f32,
   refractionStrength: f32,
+  rimLightIntensity: f32,
+  specularIntensity: f32,
+  specularPower: f32,
   lightningEnabled: f32,
   lightningIntensity: f32,
   useTextureBackground: f32,
+  randomSeed: f32,
 }
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
@@ -152,7 +157,8 @@ fn ProceduralBackground(uv: vec2<f32>, blur: f32) -> vec3<f32> {
   let bokehSize = 0.08 + blurFactor * 0.12;
 
   for (var i = 0; i < 15; i = i + 1) {
-    let seed = f32(i) * 127.1 + f32(i) * f32(i) * 3.7;
+    // Use randomSeed to vary lights each app load
+    let seed = f32(i) * 127.1 + f32(i) * f32(i) * 3.7 + uniforms.randomSeed;
     let n = N13(seed);
 
     let pos = vec2<f32>((n.x - 0.5) * aspect * 1.5, (n.y - 0.5) * 1.2);
@@ -225,19 +231,34 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
   let layer2 = S(0.0, 0.5, rainAmount);
 
   let c = Drops(centeredUV, t, staticDrops, layer1, layer2);
+  let dropMask = c.x;
 
+  // Calculate normals via finite differences
   let e = vec2<f32>(0.002, 0.0);
   let cx = Drops(centeredUV + e, t, staticDrops, layer1, layer2).x;
   let cy = Drops(centeredUV + e.yx, t, staticDrops, layer1, layer2).x;
   let n = vec2<f32>(cx - c.x, cy - c.x);
 
-  let focus = mix(maxBlur - c.y, minBlur, S(0.1, 0.2, c.x));
+  let focus = mix(maxBlur - c.y, minBlur, S(0.1, 0.2, dropMask));
 
+  // Refraction
   let refractedUV = uv + n * uniforms.refractionStrength;
   var col = Background(refractedUV, focus);
 
+  // Subtle edge highlight - rim light
+  let normalMag = length(n) * 30.0;
+  let rimLight = S(0.3, 0.8, normalMag) * dropMask * uniforms.rimLightIntensity;
+  col = col + vec3<f32>(rimLight);
+
+  // Specular highlight - bright dot
+  let lightDir = normalize(vec2<f32>(-0.5, -0.8));
+  let spec = max(0.0, dot(normalize(n + 0.0001), lightDir));
+  let specHighlight = pow(spec, uniforms.specularPower) * dropMask * uniforms.specularIntensity;
+  col = col + vec3<f32>(specHighlight);
+
+  // Color tint
   let colFade = sin(uniforms.time * 0.1) * 0.5 + 0.5;
-  col = col * mix(vec3<f32>(1.0), vec3<f32>(0.8, 0.9, 1.3), colFade * 0.3);
+  col = col * mix(vec3<f32>(1.0), vec3<f32>(0.9, 0.95, 1.05), colFade * 0.2);
 
   if (uniforms.lightningEnabled > 0.5) {
     let lt = uniforms.time * 0.5;

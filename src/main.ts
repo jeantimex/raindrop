@@ -12,9 +12,13 @@ class App {
     rainAmount: 0.8,
     dropSpeed: 0.75,
     sawProbability: 0.4,
+    dropSize: 1.0,
     minBlur: 2.0,
     maxBlur: 6.0,
     refractionStrength: 0.5,
+    rimLightIntensity: 0.08,
+    specularIntensity: 0.15,
+    specularPower: 20.0,
     lightningEnabled: true,
     lightningIntensity: 0.3,
   }
@@ -57,8 +61,13 @@ class App {
     blurFolder.add(this.params, 'minBlur', 0, 6, 0.1).name('Min Blur')
     blurFolder.add(this.params, 'maxBlur', 0, 10, 0.1).name('Max Blur')
 
+    const dropFolder = this.gui.addFolder('Drop Appearance')
+    dropFolder.add(this.params, 'refractionStrength', 0, 2, 0.05).name('Refraction')
+    dropFolder.add(this.params, 'rimLightIntensity', 0, 0.5, 0.01).name('Rim Light')
+    dropFolder.add(this.params, 'specularIntensity', 0, 0.5, 0.01).name('Specular')
+    dropFolder.add(this.params, 'specularPower', 5, 50, 1).name('Specular Sharpness')
+
     const effectsFolder = this.gui.addFolder('Effects')
-    effectsFolder.add(this.params, 'refractionStrength', 0, 2, 0.05).name('Refraction')
     effectsFolder.add(this.params, 'lightningEnabled').name('Lightning')
     effectsFolder.add(this.params, 'lightningIntensity', 0, 1, 0.05).name('Lightning Intensity')
   }

@@ -5,9 +5,13 @@ export interface RaindropParams {
   rainAmount: number
   dropSpeed: number
   sawProbability: number
+  dropSize: number
   minBlur: number
   maxBlur: number
   refractionStrength: number
+  rimLightIntensity: number
+  specularIntensity: number
+  specularPower: number
   lightningEnabled: boolean
   lightningIntensity: number
 }
@@ -31,6 +35,7 @@ export class RaindropRenderer {
   private width: number = 0
   private height: number = 0
   private time: number = 0
+  private randomSeed: number = Math.random() * 1000
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas
@@ -76,8 +81,9 @@ export class RaindropRenderer {
     })
     this.device.queue.writeBuffer(this.quadVertexBuffer, 0, quadVertices)
 
+    // 20 floats needed, round up to 80 bytes (multiple of 16)
     this.uniformBuffer = this.device.createBuffer({
-      size: 64,
+      size: 80,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     })
   }
@@ -280,13 +286,18 @@ export class RaindropRenderer {
       params.rainAmount,                      // 3
       params.dropSpeed,                       // 4
       params.sawProbability,                  // 5
-      params.minBlur,                         // 6
-      params.maxBlur,                         // 7
-      params.refractionStrength,              // 8
-      params.lightningEnabled ? 1.0 : 0.0,    // 9
-      params.lightningIntensity,              // 10
-      this.useTextureBackground ? 1.0 : 0.0,  // 11
-      0, 0, 0, 0                              // padding to 16 floats
+      params.dropSize,                        // 6
+      params.minBlur,                         // 7
+      params.maxBlur,                         // 8
+      params.refractionStrength,              // 9
+      params.rimLightIntensity,               // 10
+      params.specularIntensity,               // 11
+      params.specularPower,                   // 12
+      params.lightningEnabled ? 1.0 : 0.0,    // 13
+      params.lightningIntensity,              // 14
+      this.useTextureBackground ? 1.0 : 0.0,  // 15
+      this.randomSeed,                        // 16
+      0, 0, 0                                 // padding to 20 floats
     ])
     this.device.queue.writeBuffer(this.uniformBuffer, 0, uniforms)
   }
